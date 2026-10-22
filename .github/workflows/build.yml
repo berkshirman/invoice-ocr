@@ -34,7 +34,10 @@ jobs:
     - name: Set up Python
       uses: actions/setup-python@v5
       with:
-        python-version: '3.13'
+        # 不用 3.13：pyproject.toml 固定 numpy<2.0，而 numpy 1.x 没有 cp313
+        # 轮子，Windows 上只能从源码编译（MinGW 构建会刷 getlimits RuntimeWarning，
+        # 且极易失败）。Python 3.12 有 numpy 1.26.4 / paddlepaddle 3.0.0 官方轮子。
+        python-version: '3.12'
         cache: 'pip'
         cache-dependency-path: invoice-ocr-ai/pyproject.toml
 
@@ -90,7 +93,10 @@ jobs:
         path: invoice-ocr-ai/dist/${{ matrix.binary_name }}
         if-no-files-found: error
 
+    # 仅 tag 触发时发布 Release；手动触发的测试运行只产出 Artifact。
+    # （workflow_dispatch 没有 tag 上下文，action-gh-release 会失败）
     - name: Create Release and Upload Asset
+      if: startsWith(github.ref, 'refs/tags/')
       uses: softprops/action-gh-release@v2
       with:
         files: invoice-ocr-ai/dist/${{ matrix.binary_name }}
