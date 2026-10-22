@@ -100,6 +100,7 @@ jobs:
           --distpath dist \
           --workpath build \
           --specpath build \
+          --add-data "static:static" \
           --collect-all uvicorn \
           --collect-all fastapi \
           --collect-all starlette \
@@ -169,6 +170,7 @@ jobs:
           --distpath dist \
           --workpath build \
           --specpath build \
+          --add-data "static:static" \
           --collect-all uvicorn \
           --collect-all fastapi \
           --collect-all starlette \
@@ -187,6 +189,7 @@ jobs:
           --distpath dist `
           --workpath build `
           --specpath build `
+          --add-data "static;static" `
           --collect-all uvicorn `
           --collect-all fastapi `
           --collect-all starlette `

@@ -1,16 +1,41 @@
 import multiprocessing
+import sys
+from pathlib import Path
 
 import uvicorn
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
+from fastapi.staticfiles import StaticFiles
 from slowapi.errors import RateLimitExceeded
+from starlette.exceptions import HTTPException as StarletteHTTPException
 
 from app.config import get_settings
 from app.routers import health, invoices, settings as settings_router
 from app.rate_limit import limiter
 
 settings = get_settings()
+
+
+class SPAStaticFiles(StaticFiles):
+    """Serve the built frontend and fall back to index.html for client routes.
+
+    Unknown /api/* paths keep returning 404 instead of the SPA shell.
+    """
+
+    async def get_response(self, path, scope):
+        try:
+            return await super().get_response(path, scope)
+        except StarletteHTTPException as exc:
+            if exc.status_code == 404 and not path.lstrip("/").startswith("api/"):
+                return await super().get_response("index.html", scope)
+            raise
+
+
+def _static_dir() -> Path:
+    """Locate the frontend files in dev and in a PyInstaller onefile binary."""
+    base = Path(getattr(sys, "_MEIPASS", Path(__file__).resolve().parent.parent))
+    return base / "static"
 
 app = FastAPI(
     title="发票管理系统",
@@ -44,6 +69,11 @@ app.add_middleware(
 app.include_router(health.router, prefix="/api", tags=["Health"])
 app.include_router(invoices.router, prefix="/api/invoices", tags=["Invoices"])
 app.include_router(settings_router.router, prefix="/api/settings", tags=["Settings"])
+
+# Serve the built frontend at "/" (registered last so /api and /docs win).
+_static = _static_dir()
+if _static.is_dir():
+    app.mount("/", SPAStaticFiles(directory=str(_static), html=True), name="static")
 
 
 # @app.on_event("startup")
