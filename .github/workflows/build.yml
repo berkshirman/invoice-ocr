@@ -21,11 +21,14 @@ permissions:
   contents: write # 创建 Release 并上传产物需要写权限
 
 jobs:
-  # 根据手动选择的平台动态生成 matrix；tag 触发时 inputs 为空，构建全部平台
+  # 根据手动选择的平台生成构建计划；tag 触发时 inputs 为空，构建全部平台。
+  # 这个 job 只做字符串处理，跑在 GitHub 托管的 ubuntu-latest 上。
   prepare:
     name: Prepare matrix
     runs-on: ubuntu-latest
     outputs:
+      linux: ${{ steps.set.outputs.linux }}
+      desktop: ${{ steps.set.outputs.desktop }}
       matrix: ${{ steps.set.outputs.matrix }}
     steps:
       - name: Select platforms
@@ -36,25 +39,99 @@ jobs:
             PLATFORM="all"
           fi
 
-          linux='{"os":"ubuntu-latest","binary_name":"invoice-ocr-linux"}'
           windows='{"os":"windows-latest","binary_name":"invoice-ocr-windows.exe"}'
           # GitHub 已下线 macos-13（Intel），macos-15-intel 是目前唯一的
           # x86_64 macOS runner（保留到 2027 年 8 月）
           macos='{"os":"macos-15-intel","binary_name":"invoice-ocr-macos-x86_64"}'
 
           case "$PLATFORM" in
-            linux)   INCLUDE="[$linux]" ;;
-            windows) INCLUDE="[$windows]" ;;
-            macos)   INCLUDE="[$macos]" ;;
-            all)     INCLUDE="[$linux,$windows,$macos]" ;;
+            linux)   LINUX=true;  DESKTOP=false; INCLUDE="[]" ;;
+            windows) LINUX=false; DESKTOP=true;  INCLUDE="[$windows]" ;;
+            macos)   LINUX=false; DESKTOP=true;  INCLUDE="[$macos]" ;;
+            all)     LINUX=true;  DESKTOP=true;  INCLUDE="[$windows,$macos]" ;;
             *)       echo "Unknown platform: $PLATFORM"; exit 1 ;;
           esac
 
+          echo "linux=$LINUX" >> "$GITHUB_OUTPUT"
+          echo "desktop=$DESKTOP" >> "$GITHUB_OUTPUT"
           echo "matrix={\"include\":$INCLUDE}" >> "$GITHUB_OUTPUT"
 
-  build:
+  # Linux 产物在 RHEL 8 UBI 环境中构建（glibc 2.28），而不是 Ubuntu 24.04。
+  # 注意：GitHub 托管 runner 没有 RHEL 主机，这里使用 Red Hat 官方 UBI 8 容器；
+  # 容器共享宿主机内核，但用户态/glibc 是 RHEL 8（与 CentOS 8 相同 ABI）。
+  build-linux:
+    name: Build on RHEL 8 (UBI 8)
+    needs: prepare
+    if: needs.prepare.outputs.linux == 'true'
+    # 宿主机只负责提供 Docker；实际的构建环境由下面的 container 决定（RHEL 8）
+    runs-on: ubuntu-latest
+    container:
+      image: registry.access.redhat.com/ubi8/python-312
+      options: --user root
+    defaults:
+      run:
+        # 实际打包的是 invoice-ocr-ai 子目录，不是仓库根目录
+        working-directory: invoice-ocr-ai
+
+    steps:
+    # actions/checkout 依赖容器内的 git；UBI S2I 镜像通常自带，
+    # 这里做一次兜底安装（在 checkout 之前执行）。
+    - name: Ensure git is available
+      working-directory: . # checkout 之前 invoice-ocr-ai 目录还不存在
+      run: command -v git >/dev/null 2>&1 || dnf install -y git
+
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    # UBI 8 Python 3.12 镜像自带 python3 / pip，不使用 actions/setup-python
+    - name: Install dependencies
+      run: |
+        python3 -m pip install --upgrade pip
+        # 依赖声明在 pyproject.toml，仓库中没有 requirements.txt
+        python3 -m pip install .
+        python3 -m pip install pyinstaller
+
+    # PaddlePaddle / PaddleOCR 大量模块和数据文件是动态加载的，
+    # 必须用 --collect-all 显式收集，否则运行时会报 ModuleNotFoundError。
+    - name: Build with PyInstaller
+      run: |
+        python3 -m PyInstaller --noconfirm --clean --onefile \
+          --name invoice-ocr-linux \
+          --distpath dist \
+          --workpath build \
+          --specpath build \
+          --collect-all uvicorn \
+          --collect-all fastapi \
+          --collect-all starlette \
+          --collect-all paddle \
+          --collect-all paddleocr \
+          --collect-all paddlex \
+          --collect-all app \
+          --paths . \
+          app/main.py
+
+    - name: Upload Artifacts
+      uses: actions/upload-artifact@v4
+      with:
+        name: invoice-ocr-linux
+        path: invoice-ocr-ai/dist/invoice-ocr-linux
+        if-no-files-found: error
+
+    # 仅 tag 触发时发布 Release；手动触发的测试运行只产出 Artifact。
+    - name: Create Release and Upload Asset
+      if: startsWith(github.ref, 'refs/tags/')
+      uses: softprops/action-gh-release@v2
+      with:
+        files: invoice-ocr-ai/dist/invoice-ocr-linux
+        fail_on_unmatched_files: true
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  # Windows / macOS 只能跑在各自的原生托管 runner 上
+  build-desktop:
     name: Build on ${{ matrix.os }}
     needs: prepare
+    if: needs.prepare.outputs.desktop == 'true'
     runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
@@ -62,7 +139,6 @@ jobs:
 
     defaults:
       run:
-        # 实际打包的是 invoice-ocr-ai 子目录，不是仓库根目录
         working-directory: invoice-ocr-ai
 
     steps:
@@ -82,14 +158,11 @@ jobs:
     - name: Install dependencies
       run: |
         python -m pip install --upgrade pip
-        # 依赖声明在 pyproject.toml，仓库中没有 requirements.txt
         python -m pip install .
         python -m pip install pyinstaller
 
-    # PaddlePaddle / PaddleOCR 大量模块和数据文件是动态加载的，
-    # 必须用 --collect-all 显式收集，否则运行时会报 ModuleNotFoundError。
-    - name: Build with PyInstaller (Linux / macOS)
-      if: runner.os != 'Windows'
+    - name: Build with PyInstaller (macOS)
+      if: runner.os == 'macOS'
       run: |
         pyinstaller --noconfirm --clean --onefile \
           --name "${{ matrix.binary_name }}" \
@@ -132,7 +205,6 @@ jobs:
         if-no-files-found: error
 
     # 仅 tag 触发时发布 Release；手动触发的测试运行只产出 Artifact。
-    # （workflow_dispatch 没有 tag 上下文，action-gh-release 会失败）
     - name: Create Release and Upload Asset
       if: startsWith(github.ref, 'refs/tags/')
       uses: softprops/action-gh-release@v2
