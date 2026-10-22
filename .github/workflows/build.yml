@@ -1,0 +1,99 @@
+name: Build Binary Executable
+
+on:
+  push:
+    tags:
+      - 'v*' # 提交类似 v1.0.0 的 tag 时触发打包
+  workflow_dispatch: # 支持在 Actions 页面手动触发，便于调试
+
+permissions:
+  contents: write # 创建 Release 并上传产物需要写权限
+
+jobs:
+  build:
+    name: Build on ${{ matrix.os }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+            binary_name: invoice-ocr-linux
+          - os: windows-latest
+            binary_name: invoice-ocr-windows.exe
+
+    defaults:
+      run:
+        # 实际打包的是 invoice-ocr-ai 子目录，不是仓库根目录
+        working-directory: invoice-ocr-ai
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Set up Python
+      uses: actions/setup-python@v5
+      with:
+        python-version: '3.13'
+        cache: 'pip'
+        cache-dependency-path: invoice-ocr-ai/pyproject.toml
+
+    - name: Install dependencies
+      run: |
+        python -m pip install --upgrade pip
+        # 依赖声明在 pyproject.toml，仓库中没有 requirements.txt
+        python -m pip install .
+        python -m pip install pyinstaller
+
+    # PaddlePaddle / PaddleOCR 大量模块和数据文件是动态加载的，
+    # 必须用 --collect-all 显式收集，否则运行时会报 ModuleNotFoundError。
+    - name: Build with PyInstaller (Linux)
+      if: runner.os == 'Linux'
+      run: |
+        pyinstaller --noconfirm --clean --onefile \
+          --name "${{ matrix.binary_name }}" \
+          --distpath dist \
+          --workpath build \
+          --specpath build \
+          --collect-all uvicorn \
+          --collect-all fastapi \
+          --collect-all starlette \
+          --collect-all paddle \
+          --collect-all paddleocr \
+          --collect-all paddlex \
+          --collect-all app \
+          --paths . \
+          app/main.py
+
+    - name: Build with PyInstaller (Windows)
+      if: runner.os == 'Windows'
+      run: |
+        pyinstaller --noconfirm --clean --onefile `
+          --name "${{ matrix.binary_name }}" `
+          --distpath dist `
+          --workpath build `
+          --specpath build `
+          --collect-all uvicorn `
+          --collect-all fastapi `
+          --collect-all starlette `
+          --collect-all paddle `
+          --collect-all paddleocr `
+          --collect-all paddlex `
+          --collect-all app `
+          --paths . `
+          app/main.py
+
+    - name: Upload Artifacts
+      uses: actions/upload-artifact@v4
+      with:
+        name: ${{ matrix.binary_name }}
+        path: invoice-ocr-ai/dist/${{ matrix.binary_name }}
+        if-no-files-found: error
+
+    - name: Create Release and Upload Asset
+      uses: softprops/action-gh-release@v2
+      with:
+        files: invoice-ocr-ai/dist/${{ matrix.binary_name }}
+        fail_on_unmatched_files: true
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

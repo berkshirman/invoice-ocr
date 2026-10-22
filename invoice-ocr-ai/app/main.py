@@ -1,3 +1,5 @@
+import multiprocessing
+
 import uvicorn
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
@@ -53,14 +55,12 @@ app.include_router(settings_router.router, prefix="/api/settings", tags=["Settin
 
 
 def main():
-    uvicorn.run(
-        app="app.main:app",
-        host="0.0.0.0",
-        port=18080,
-        # reload=True if config.ENVIRONMENT != "production" else False,
-        reload=True,
-        workers=1,
-    )
+    # Required on Windows for frozen executables that spawn subprocesses.
+    multiprocessing.freeze_support()
+    # Pass the app object directly and disable reload: a PyInstaller onefile
+    # binary cannot re-import "app.main:app" in a spawned subprocess.
+    # For development use `uvicorn app.main:app --reload` instead.
+    uvicorn.run(app, host="0.0.0.0", port=18080, workers=1)
 
 
 if __name__ == "__main__":
