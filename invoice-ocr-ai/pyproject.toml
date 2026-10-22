@@ -3,7 +3,7 @@ requires = ["setuptools>=68", "wheel"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "invoice-manager"
+name = "invoice-ocr-ai"
 version = "0.3.0"
 description = "AI-powered Chinese invoice recognition with OCR + LLM dual-source verification"
 requires-python = ">=3.10,<4.0"

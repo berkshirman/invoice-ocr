@@ -1,9 +1,10 @@
 <div align="center">
 
-# Invoice Manager 🧾
+# invoice-ocr 🧾
 
 ### AI-Powered Chinese Invoice Recognition with Dual-Source Verification
 ### AI驱动的中文发票识别系统 · OCR+LLM双源验证
+https://github.com/stone16/Invoice-Manager/tree/main 
 
 **v0.3.0** | Latest Release: 2026-01-24
 
