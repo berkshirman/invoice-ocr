@@ -1,0 +1,75 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "invoice-manager"
+version = "0.3.0"
+description = "AI-powered Chinese invoice recognition with OCR + LLM dual-source verification"
+requires-python = ">=3.10,<4.0"
+license = { text = "MIT" }
+authors = [{ name = "Invoice Manager Contributors" }]
+keywords = ["invoice", "ocr", "paddleocr", "llm", "fastapi"]
+classifiers = [
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Framework :: FastAPI",
+    "License :: OSI Approved :: MIT License",
+]
+dependencies = [
+    # FastAPI and server
+    "fastapi==0.109.0",
+    "uvicorn[standard]==0.27.0",
+    "python-multipart==0.0.6",
+    # Database
+    "sqlalchemy==2.0.55",
+    "asyncpg==0.30.0",
+    "alembic==1.13.1",
+    "psycopg2-binary==2.9.10",
+    # OCR - using headless OpenCV for Docker
+    # PaddleOCR 3.x requires PaddlePaddle >= 3.0 (Python 3.13 supported).
+    # PaddlePaddle 3.0.0 is the last release with Intel macOS wheels;
+    # newer 3.x versions only publish arm64 macOS builds.
+    # numpy 1.x still satisfies paddlex's >=1.24,<2.4 constraint
+    "numpy<2.0",
+    "paddlepaddle==3.0.0",
+    "paddleocr==3.7.0",
+    "opencv-python-headless>=4.8.0",
+    # LLM (optional)
+    "openai>=1.50.0,<2.0",
+    # Utilities
+    "python-dotenv==1.0.0",
+    "pydantic==2.10.6",
+    "pydantic-settings==2.1.0",
+    "Pillow==11.1.0",
+    "pdf2image==1.17.0",
+    "pdfplumber==0.10.3",
+    "openpyxl==3.1.2",
+    # Rate limiting
+    "slowapi==0.1.9",
+    # HTTP client (also used at runtime by services/model_registry.py)
+    "httpx==0.26.0",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest==7.4.4",
+    "pytest-asyncio==0.23.3",
+]
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["app*"]
+
+[tool.poetry]
+# Explicitly tell Poetry the import package is `app`, not `invoice_manager`
+# (the default it would derive from the distribution name).
+packages = [{ include = "app" }]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+# Allow `pytest` from backend/ to import `app` without an editable install.
+pythonpath = ["."]
